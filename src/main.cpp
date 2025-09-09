@@ -1,139 +1,156 @@
 // Libraries
-#include <opencv2/opencv.hpp>
 #include <iostream>
-#include <vector>
-#include <ctime>
-#include <chrono>
-#include <iomanip>
 
-#include "PARAMS.h"
-#include "ALSA.h"
-#include "Beamform.h"
-#include "Video.h"
-#include "Timer.h"
-#include "wav.h"
-
-using namespace std;
-
-CONFIG configs(NUM_INT_CONFIGS, NUM_FLOAT_CONFIGS, NUM_BOOL_CONFIGS, NUM_STRING_CONFIGS);
+// Headers
+#include "Audio.hpp"      // Audio streaming from ALSA or AudioFile
+#include "Video.hpp"      // Camera and GUI rendering
+#include "Beamform.hpp"   // Beamforming and audio processing
+#include "LambdaUtil.hpp" // Utility functions for LambdaCam
+#include "ConfigIO.hpp"   // Config file reading/writing
+#include "ConfigKey.hpp"  // Names and keys for each config
+#include "Structs.hpp"    // Custom structs
 
 int main()
 {
-    Mat frame;
+    // Create a gap in the console so it is easier to see output
+    std::cout << "\n";
+
+    array2D<int> channel_order_test(4, 4);
+
+    channel_order_test.at(0, 0) = 10;
+    channel_order_test.at(0, 1) = 8;
+    channel_order_test.at(0, 2) = 2;
+    channel_order_test.at(0, 3) = 0;
+
+    channel_order_test.at(1, 0) = 11;
+    channel_order_test.at(1, 1) = 9;
+    channel_order_test.at(1, 2) = 3;
+    channel_order_test.at(1, 3) = 1;
+
+    channel_order_test.at(2, 0) = 14;
+    channel_order_test.at(2, 1) = 12;
+    channel_order_test.at(2, 2) = 6;
+    channel_order_test.at(2, 3) = 4;
+
+    channel_order_test.at(3, 0) = 15;
+    channel_order_test.at(3, 1) = 13;
+    channel_order_test.at(3, 2) = 7;
+    channel_order_test.at(3, 3) = 5;
+
+    std::string order = LUtil::packChannelOrder(channel_order_test);
+    std::cout << "Order: " << order << "\n";
 
     //=====================================================================================
 
-    // Initialize ALSA and Beamform
-    #ifdef ENABLE_AUDIO
-    #ifdef ENABLE_ALSA
-    ALSA ALSA(AUDIO_DEVICE_NAME);
-    #endif // ENABLE_ALSA
-    beamform beamform(1);
-    #endif // ENABLE_AUDIO
+    /* Initialize configs */
 
-    // Initialize video
-    #ifdef ENABLE_VIDEO
-    video video(RESOLUTION_WIDTH, RESOLUTION_HEIGHT, FRAME_RATE);
-    #endif // ENABLE_VIDEO
+    // Global config object
+    CONFIG global_config(
+        static_cast<size_t>(LKey::NUM_INT_CONFIGS), 
+        static_cast<size_t>(LKey::NUM_FLOAT_CONFIGS), 
+        static_cast<size_t>(LKey::NUM_BOOL_CONFIGS), 
+        static_cast<size_t>(LKey::NUM_STRING_CONFIGS));
 
-    //=====================================================================================
-
-    // Timer for testing
-    timer main_loop_time("Main Loop");
-
-    // Arrays to store data
-    array3D<float> audio_data_buffer_1(M_AMOUNT, N_AMOUNT, FFT_SIZE);
-    array3D<float> audio_data_buffer_2(M_AMOUNT, N_AMOUNT, FFT_SIZE);
-    cv::Mat processed_data(NUM_THETA, NUM_PHI, CV_32FC1, cv::Scalar(0));
-
-    // Clear buffers
-    for (int m = 0; m < audio_data_buffer_1.dim_1; m++)
+    // Read from default configs
+    if (!ConfigIO::readConfig(global_config, true))
     {
-        for (int n = 0; n < audio_data_buffer_1.dim_2; n++)
+        LUtil::error("Main", "Failed to read default config");
+        return 1;
+    }
+
+    // Read from user configs and overwrite defaults if availible
+    if (!ConfigIO::readConfig(global_config))
+    {
+        LUtil::error("Main", "Failed to read user configs");
+        return 1;
+    }
+
+    // Write config to ensure it has all variables
+    if (!ConfigIO::writeConfig(global_config))
+    {
+        LUtil::error("Main", "Failed to write config");
+        return 1;
+    } 
+
+    //=====================================================================================
+
+    /* Allocate memory for buffers */
+
+    // Audio data buffers
+    array3D<float> audio_data_buffer_1(
+        global_config.i(LKey::M_CHANNELS), 
+        global_config.i(LKey::N_CHANNELS), 
+        global_config.i(LKey::FFT_FRAME_SIZE));
+    array3D<float> audio_data_buffer_2(
+        global_config.i(LKey::M_CHANNELS), 
+        global_config.i(LKey::N_CHANNELS), 
+        global_config.i(LKey::FFT_FRAME_SIZE));
+    
+    // Beamforming output buffer
+    array2D<float> beamform_data_buffer(
+        global_config.i(LKey::FOV_THETA),
+        global_config.i(LKey::FOV_PHI));
+
+    //=====================================================================================
+
+    /* Initialize classes */
+
+    // Test data***
+    array2D<float> test_input_data(100, 100);
+    test_input_data.fill(-45.0f);
+    float time = 0.0f;
+
+    // Initialize video class and dispatch thread to record video
+    Video video; 
+    if (!video.startVideo())
+    {
+        LUtil::error("Main", "Failed to start video capture");
+        return 1;
+    }
+
+    // Initialize the audio class
+    Audio audio(global_config);
+    if (!audio.initAudio())
+    {
+        LUtil::error("Main", "Failed to start audio stream");
+        return 1;
+    }
+
+    // Initialize the beamform class
+    Beamform beamform(global_config);
+    if (!beamform.initBeamform())
+    {
+        LUtil::error("Main", "Failed to initialize beamforming");
+        return 1;
+    }
+    
+    //=====================================================================================
+
+    time = 0.05f;
+    // LUtil::radialGradient(test_input_data, -100, 0, time);
+    // Dispatch a thread to stream audio from ALSA or AudioFile
+    audio.startAudioStream();
+
+    std::cout << "\n==================== Starting main loop ====================\n";
+    // Main loop
+    while (video.video_running)
+    {
+        LUtil::radialGradient(test_input_data, -100, 0, time); // Generate a radial gradient***testing
+
+        // Copy audio stream into main thread
+        audio.accessRingBuffer(audio_data_buffer_1, audio_data_buffer_2);
+
+        // Perform beamforming algorithm to audio data
+        beamform.processAudioFrame(audio_data_buffer_1, beamform_data_buffer, 40);
+
+        // Draw the UI and create a heatmap
+        // if(!video.processFrame(beamform_data_buffer, -100, 0, 0.5f))
+        if (!video.processFrame(test_input_data, -100, 0, 0.5f))
         {
-            for (int b = 0; b < audio_data_buffer_1.dim_3; b++)
-            {
-                audio_data_buffer_1.at(m, n, b) = 0.0f;
-                audio_data_buffer_2.at(m, n, b) = 0.0f;
-            } // end b
-        } // end n
-    } // end m
+            LUtil::error("Main", "Failed to process frame");
+            break;
+        }
+    }
 
-    // Send configuration to ALSA and start recording audio
-    #ifdef ENABLE_AUDIO
-    #ifdef ENABLE_ALSA
-    ALSA.setup();
-    ALSA.start();
-    #endif // ENABLE_ALSA
-    // cout << "Audio setup complete.\n"; 
-
-    beamform.setup();
-    // cout << "Beamform setup complete.\n";
-
-    #ifdef ENABLE_WAV
-    WAV WAV;
-    WAV.setup("test1k.wav");
-    #endif // ENABLE_WAV
-    #endif // ENABLE_AUDIO
-
-    // Start video capture
-    #ifdef ENABLE_VIDEO 
-    video.startCapture();
-    cout << "Video setup complete.\n";
-    #endif // ENABLE_VIDEO
-
-    int pcm_error;
- 
-    //=====================================================================================
-
-    cout << "Starting main loop.\n";
-    while(1)
-    {
-        
-        main_loop_time.start();
-
-        // Copy data from ring buffer and process beamforming
-        #ifdef ENABLE_AUDIO
-        #ifdef ENABLE_ALSA
-        ALSA.copyRingBuffer(audio_data_buffer_1, audio_data_buffer_2);
-        #endif // ENABLE_ALSA
-
-        // Test data read from a wav file
-        #ifdef ENABLE_WAV
-        WAV.readWAV(audio_data_buffer_1, audio_data_buffer_2);
-        #endif // ENABLE_WAV
-
-        beamform.processData(processed_data, configs.i(bin), audio_data_buffer_1);
-        #endif // ENABLE_AUDIO
-        
-        // Generate heatmap and ui then display the frame
-        pcm_error = 0;
-
-        #ifdef ENABLE_VIDEO
-        // if (waitKey(1) >= 0) break;
-        #ifdef ENABLE_AUDIO
-        #ifdef ENABLE_ALSA
-        pcm_error = ALSA.pcm_error;
-        #endif // ENABLE_ALSA
-        #endif // ENABLE_AUDIO
-        if (video.processFrame(processed_data, pcm_error) == false) break;
-        #endif // ENABLE_VIDEO
-
-        main_loop_time.stop();
-    } // end loop
-
-    //=====================================================================================
-
-    // Clean up and exit
-    #ifdef ENABLE_AUDIO
-    #ifdef ENABLE_ALSA
-    ALSA.stop();
-    #endif // ENABLE_ALSA
-    #endif // ENABLE_AUDIO
-
-    #ifdef ENABLE_VIDEO
-    video.stopCapture();
-    #endif // ENABLE_VIDEO
- 
     return 0;
 } // end main
