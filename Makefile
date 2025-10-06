@@ -1,7 +1,7 @@
 # Compiler and flags
 CXX := g++
 CXX_FLAGS := -Wall -Wextra -Wno-strict-aliasing -std=c++17 -O2 -D_REENTRANT `pkg-config --cflags opencv4 sdl2`
-INCLUDES := -Iinclude -Iimgui 
+INCLUDES := -Iinclude -Ilibs/imgui -Ilibs
 
 # Other Flags
 OPENCV_FLAGS := `pkg-config --libs opencv4`
@@ -14,16 +14,17 @@ FLAGS := $(OPENCV_FLAGS) $(IMGUI_FLAGS) $(ALSA_FLAGS) $(FFTW_FLAGS)
 SRC_DIR := src
 OBJ_DIR := build
 BIN := LambdaCam
+IMGUI_DIR := libs/imgui/
 
 # Find all .cpp files
 SRCS := $(wildcard $(SRC_DIR)/*.cpp) \
-        imgui/imgui.cpp \
-        imgui/imgui_draw.cpp \
-        imgui/imgui_tables.cpp \
-        imgui/imgui_widgets.cpp \
-        imgui/imgui_demo.cpp \
-        imgui/imgui_impl_sdl2.cpp \
-        imgui/imgui_impl_opengl3.cpp
+        $(IMGUI_DIR)imgui.cpp \
+        $(IMGUI_DIR)imgui_draw.cpp \
+        $(IMGUI_DIR)imgui_tables.cpp \
+        $(IMGUI_DIR)imgui_widgets.cpp \
+        $(IMGUI_DIR)imgui_demo.cpp \
+        $(IMGUI_DIR)imgui_impl_sdl2.cpp \
+        $(IMGUI_DIR)imgui_impl_opengl3.cpp
 OBJS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRCS))
 
 # Default target
@@ -44,6 +45,6 @@ clean:
 
 # Run the program
 run: all
-	./$(BIN)
+	./$(BIN) 
 
 .PHONY: all clean run

@@ -119,8 +119,8 @@ array2D<int> LUtil::unpackChannelOrder(const std::string& packed_order)
 // Generate a radial gradient and move it around smoothly
 void LUtil::radialGradient(array2D<float>& data_array, const float min, const float max, float& t)
 {
-    const float speed = 0.05f; // Controls how fast the center moves
-    const float radius = 10.0f; // Radius of the circular motion
+    const float speed = 0.05f;  // Controls how fast the center moves
+    const float radius = static_cast<int>(data_array.dim_1) * 0.1f; // Radius of the circular motion
 
     float center_x = data_array.dim_1 / 2.0f + radius * std::sin(t * speed);
     float center_y = data_array.dim_2 / 2.0f + radius * std::cos(t * speed);

@@ -13,6 +13,7 @@
 #include "imgui.h"              // ImGui
 #include "imgui_impl_sdl2.h"    // ImGui
 #include "imgui_impl_opengl3.h" // ImGui
+#include "implot.h"             // ImPlot
 #include "Structs.hpp"          // Custom strucs and enums
 #include "LambdaColor.hpp"      // List of LambdaColors
 #include "LambdaUtil.hpp"       // Error reporting function
@@ -21,8 +22,12 @@
 
 /* Class constructors and destructors */
 
-Video::Video():
-    vid_cap(0) // Initialize video capture with default camera (0)
+Video::Video(Config& global_config):
+    config(global_config), // Initialize reference to global config
+    vid_cap(0), // Initialize video capture with default camera (0)
+    checkbox_1("Checkbox 1"),
+    dropdown_1("Dropdown 1", {"Option 1", "Option 2", "Option 3"}),
+    text_input_1("Text Input 1")
 {
     
 } // end Video
@@ -84,16 +89,17 @@ void Video::stopVideo()
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
-
+    // ImPlot::DestroyContext();
+ 
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);
     SDL_Quit();
-
+ 
     // Clean up OpenGL texture
     glDeleteTextures(1, &texture_id);
 
 } // end stopVideo
-
+ 
 //=====================================================================================
 
 /* Continuously captures video from the camera on a separate thread */
@@ -126,8 +132,11 @@ void Video::captureVideo(cv::VideoCapture& cap)
 
 /* Generates heatmap, overlays it on the camera frame, and displays all UI elements */
 
-bool Video::processFrame(array2D<float>& beamformed_data, const float min, const float max, const float alpha)
+bool Video::processFrame(array2D<float>& beamformed_data)
 {
+    // Read from config
+    config.read();
+
     // Resize and scale the input data
     beamformed_data_buffer.copy(beamformed_data);
 
@@ -137,7 +146,10 @@ bool Video::processFrame(array2D<float>& beamformed_data, const float min, const
     // Display the frame on the ImGui window
     
     // Render all ImGui elements
-    renderImGui(beamformed_data_buffer, min, max, alpha);
+    renderImGui(beamformed_data_buffer);
+
+    // Write to config
+    config.write();
 
     return true;
 } // end processFrame
@@ -161,9 +173,9 @@ bool Video::initImGui()
     SDL_DisplayMode displayMode;
     if (SDL_GetCurrentDisplayMode(0, &displayMode) == 0) 
     {
-        screen_width = displayMode.w;
-        screen_height = displayMode.h;
-        std::cout << "Video: Screen size: " << screen_width << "x" << screen_height << "\n";
+        screen_size.x = displayMode.w;
+        screen_size.y = displayMode.h;
+        std::cout << "Video: Screen size: " << screen_size.x << "x" << screen_size.y << "\n";
     } 
     else 
     {
@@ -183,7 +195,7 @@ bool Video::initImGui()
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
     window_flags = (SDL_WindowFlags)(SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    window = SDL_CreateWindow("LambdaCam", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screen_width, screen_height, window_flags);
+    window = SDL_CreateWindow("LambdaCam", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screen_size.x, screen_size.y, window_flags);
 
     if (window == nullptr)
     {
@@ -205,6 +217,7 @@ bool Video::initImGui()
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    // ImPlot::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
 
     // Setup Dear ImGui style
@@ -242,12 +255,12 @@ bool Video::initOpenCV()
     }
 
     // Find frame size based on screen size
-    std::cout << "Video: Requested frame size: " << frame_width << "x" << frame_height << "\n";
+    std::cout << "Video: Requested frame size: " << frame_size.x << "x" << frame_size.y << "\n";
 
     // Set the properties for the video capture
     vid_cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M','J','P','G'));
-    vid_cap.set(cv::CAP_PROP_FRAME_WIDTH, frame_width);
-    vid_cap.set(cv::CAP_PROP_FRAME_HEIGHT, frame_height);
+    vid_cap.set(cv::CAP_PROP_FRAME_WIDTH, frame_size.x);
+    vid_cap.set(cv::CAP_PROP_FRAME_HEIGHT, frame_size.y);
     vid_cap.set(cv::CAP_PROP_FPS, frame_rate);
 
     std::cout << "Video: Actual frame size is: " << vid_cap.get(cv::CAP_PROP_FRAME_WIDTH) << "x" << vid_cap.get(cv::CAP_PROP_FRAME_HEIGHT) << "\n";
@@ -285,7 +298,7 @@ bool Video::initOpenGL()
 
 /* Renders all UI elements in ImGui */
 
-bool Video::renderImGui(array2D<float>& beamformed_data, const float min, const float max, const float alpha)
+bool Video::renderImGui(array2D<float>& beamformed_data)
 {
     // Start a new frame
     SDL_Event event;
@@ -308,15 +321,16 @@ bool Video::renderImGui(array2D<float>& beamformed_data, const float min, const 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();   
+    applyUIStyle(); // Apply custom UI styles
 
     // Retrieve window size and calculate scaling factors
     window_size = ImGui::GetIO().DisplaySize;
-    x_factor = window_size.x / 1920.0f; // Assuming unit screen size of 1920x1080
-    y_factor = window_size.y / 1080.0f;
+    scale.x = window_size.x / 1920.0f; // Assuming unit screen size of 1920x1080
+    scale.y = window_size.y / 1080.0f;
     
     // Create ImGui window at top left with constant size
     ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(screen_width, screen_height), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(screen_size, ImGuiCond_Always);
     ImGui::Begin("LambdaCam", nullptr, 
                 ImGuiWindowFlags_NoMove | 
                 ImGuiWindowFlags_NoResize | 
@@ -326,20 +340,74 @@ bool Video::renderImGui(array2D<float>& beamformed_data, const float min, const 
     
     /* Create all GUI elements */
 
-    // Create sliders
-    ImGui::SetCursorPos(windowPos(1000, 800)); // Set starting location for sliders
-    slider("Slider 1", &val_1, 0.0f, 100.0f, 50, 200, slider_spacing);
-    slider("Slider 2", &val_2, 0.0f, 100.0f, 50, 200, slider_spacing);
-    slider("Slider 3", &val_1, 0.0f, 100.0f, 50, 200, slider_spacing);
-    slider("Slider 4", &val_2, 0.0f, 100.0f, 50, 200, slider_spacing);
-    slider("Slider 5", &val_1, 0.0f, 100.0f, 50, 200, slider_spacing);
+    // Right side buttons
+    ImVec2 button_size = windowScale(100, 100);
+    record.update(windowScale(1820, 19), button_size);
+    screenshot.update(windowScale(1820, 119), button_size);
 
-    // Apply heatmap and display the frame
-    applyHeatmap(beamformed_data, min, max, alpha); // Apply heatmap to the current frame
-    frametoTexture();
-    ImGui::SetCursorPos(windowPos(20, 20));
-    ImGui::Image((ImTextureID)(intptr_t)texture_id, ImVec2(display_frame.cols, display_frame.rows));
+    // Frequency Slider
+    freq_slider.update(windowScale(101, 985), windowScale(759, 90));
+    ImVec2 freq_button_size = windowScale(90, 90);
+    bump_freq_up.update(windowScale(864, 985), freq_button_size);
+    bump_freq_down.update(windowScale(5, 985), freq_button_size);
+
+    // Control Sliders
+    ImVec2 slider_size = windowScale(100, 700);
+    min_slider.update(windowScale(965, 355), slider_size, config.min);
+    max_slider.update(windowScale(1070, 355), slider_size, config.max);
+    alpha_slider.update(windowScale(1175, 355), slider_size, config.alpha);
+
+
+
+
+
+    // Create checkboxes
+    checkbox_1.update(windowScale(1400, 100), button_size);
+
+    // Create dropdowns
+    ImVec2 dropdown_size = windowScale(200, 25);
+    dropdown_1.update(windowScale(1600, 100), dropdown_size);
+
+    // Create text inputs
+    ImVec2 text_input_size = windowScale(200, 25); 
+    text_input_1.update(windowScale(1600, 150), text_input_size);
+
+    // Display camera feed with heatmap overlay
+    ImVec2 camera_size = windowScale(960, 960);
+    if (config.show_heatmap)
+        applyHeatmap(beamformed_data, config.min, config.max, config.alpha, camera_size); // Apply heatmap to the current frame
+
+    else
+        display_frame = resizeAndCrop(current_frame, camera_size);   // Resize and crop the current frame
     
+    frametoTexture();
+    ImGui::SetCursorPos(ImVec2(0, 19)); // Cursor to place camera
+    ImGui::Image((ImTextureID)(intptr_t)texture_id, ImVec2(display_frame.cols, display_frame.rows));
+
+    // Check if heatmap is hovered and display value at cursor
+    if (config.show_heatmap && ImGui::IsItemHovered())
+    {
+        ImVec2 mouse_pos = ImGui::GetMousePos();
+        ImVec2 image_pos = ImGui::GetItemRectMin();
+
+        int x = static_cast<int>(mouse_pos.x - image_pos.x);
+        int y = static_cast<int>(mouse_pos.y - image_pos.y);
+
+        // Map from display_frame pixel coordinates → beamformed_data coordinates
+        int dataX = static_cast<int>((float)x / display_frame.cols * beamformed_data.dim_1);
+        int dataY = static_cast<int>((float)y / display_frame.rows * beamformed_data.dim_2);
+
+        // Ensure within bounds of beamformed_data
+        if (dataX >= 0 && dataX < static_cast<int>(beamformed_data.dim_1) &&
+            dataY >= 0 && dataY < static_cast<int>(beamformed_data.dim_2))
+        {
+            float value = beamformed_data.at(dataY, dataX);
+            ImGui::BeginTooltip();
+            ImGui::Text("( %d, %d) %.2f", dataX, dataY, value);
+            ImGui::EndTooltip();
+        }
+    }
+
     // Main menu bar
     mainMenuBar();
 
@@ -348,7 +416,7 @@ bool Video::renderImGui(array2D<float>& beamformed_data, const float min, const 
 
     // Render UI
     ImGui::Render();
-    glViewport(0, 0, screen_width, screen_height); 
+    glViewport(0, 0, screen_size.x, screen_size.y); 
     glClear(GL_COLOR_BUFFER_BIT);
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
@@ -359,77 +427,9 @@ bool Video::renderImGui(array2D<float>& beamformed_data, const float min, const 
 
 //=====================================================================================
 
-/* Helper functions for ImGui UI elements */
+/* UI Elements */
 
-void Video::initUIStyle()
-{
-    // Initialize style element
-    ImGuiStyle& style = ImGui::GetStyle();
-
-    // Set UI colors
-    style.Colors[ImGuiCol_Text]                      = LColor::off_white;
-    style.Colors[ImGuiCol_TextDisabled]              = LColor::light_grey_t;
-    style.Colors[ImGuiCol_WindowBg]                  = LColor::dark_grey_t;
-    style.Colors[ImGuiCol_ChildBg]                   = LColor::base;
-    style.Colors[ImGuiCol_PopupBg]                   = LColor::base;
-    style.Colors[ImGuiCol_Border]                    = LColor::base;
-    style.Colors[ImGuiCol_BorderShadow]              = LColor::base;
-    style.Colors[ImGuiCol_FrameBg]                   = LColor::base;
-    style.Colors[ImGuiCol_FrameBgHovered]            = LColor::base;
-    style.Colors[ImGuiCol_FrameBgActive]             = LColor::base;
-    style.Colors[ImGuiCol_TitleBg]                   = LColor::base;
-    style.Colors[ImGuiCol_TitleBgActive]             = LColor::base;
-    style.Colors[ImGuiCol_TitleBgCollapsed]          = LColor::base;
-    style.Colors[ImGuiCol_MenuBarBg]                 = LColor::base;
-    style.Colors[ImGuiCol_ScrollbarBg]               = LColor::base;
-    style.Colors[ImGuiCol_ScrollbarGrab]             = LColor::base;
-    style.Colors[ImGuiCol_ScrollbarGrabHovered]      = LColor::base;
-    style.Colors[ImGuiCol_ScrollbarGrabActive]       = LColor::base;
-    style.Colors[ImGuiCol_CheckMark]                 = LColor::base;
-    style.Colors[ImGuiCol_SliderGrab]                = LColor::red;
-    style.Colors[ImGuiCol_SliderGrabActive]          = LColor::pink;
-    style.Colors[ImGuiCol_Button]                    = LColor::base;
-    style.Colors[ImGuiCol_ButtonHovered]             = LColor::base;
-    style.Colors[ImGuiCol_ButtonActive]              = LColor::base;
-    style.Colors[ImGuiCol_Header]                    = LColor::base;
-    style.Colors[ImGuiCol_HeaderHovered]             = LColor::base;
-    style.Colors[ImGuiCol_HeaderActive]              = LColor::base;
-    style.Colors[ImGuiCol_Separator]                 = LColor::base;
-    style.Colors[ImGuiCol_SeparatorHovered]          = LColor::base;
-    style.Colors[ImGuiCol_SeparatorActive]           = LColor::base;
-    style.Colors[ImGuiCol_ResizeGrip]                = LColor::base;
-    style.Colors[ImGuiCol_ResizeGripHovered]         = LColor::base;
-    style.Colors[ImGuiCol_ResizeGripActive]          = LColor::base;
-    style.Colors[ImGuiCol_TabHovered]                = LColor::base;
-    style.Colors[ImGuiCol_Tab]                       = LColor::base;
-    style.Colors[ImGuiCol_TabSelected]               = LColor::base;
-    style.Colors[ImGuiCol_TabSelectedOverline]       = LColor::base;
-    style.Colors[ImGuiCol_TabDimmed]                 = LColor::base;
-    style.Colors[ImGuiCol_TabDimmedSelected]         = LColor::base;
-    style.Colors[ImGuiCol_TabDimmedSelectedOverline] = LColor::base;
-    style.Colors[ImGuiCol_PlotLines]                 = LColor::base;
-    style.Colors[ImGuiCol_PlotLinesHovered]          = LColor::base;
-    style.Colors[ImGuiCol_PlotHistogram]             = LColor::base;
-    style.Colors[ImGuiCol_PlotHistogramHovered]      = LColor::base;
-    style.Colors[ImGuiCol_TableHeaderBg]             = LColor::base;
-    style.Colors[ImGuiCol_TableBorderStrong]         = LColor::base;
-    style.Colors[ImGuiCol_TableBorderLight]          = LColor::base;
-    style.Colors[ImGuiCol_TableRowBg]                = LColor::base;
-    style.Colors[ImGuiCol_TableRowBgAlt]             = LColor::base;
-    style.Colors[ImGuiCol_TextLink]                  = LColor::base;
-    style.Colors[ImGuiCol_TextSelectedBg]            = LColor::base;
-    style.Colors[ImGuiCol_DragDropTarget]            = LColor::base;
-    style.Colors[ImGuiCol_NavCursor]                 = LColor::base;
-    style.Colors[ImGuiCol_NavWindowingHighlight]     = LColor::base;
-    style.Colors[ImGuiCol_NavWindowingDimBg]         = LColor::base;
-    style.Colors[ImGuiCol_ModalWindowDimBg]          = LColor::base;
-} // end setUIStyle
-
-ImVec2 Video::windowPos(const int x, const int y)
-{
-    return ImVec2(x * x_factor, y * y_factor);
-} // end windowPos
-
+// Might get turned into a struct later***
 void Video::mainMenuBar()
 {
     if (ImGui::BeginMenuBar())
@@ -448,6 +448,9 @@ void Video::mainMenuBar()
             if (ImGui::MenuItem("Open Measurement"))
                 LUtil::error("Video", "Open Measurement not implemented yet");
 
+            if (ImGui::MenuItem("Select Directory"))
+                LUtil::error("Video", "Select Directory not implemented yet");
+
             ImGui::EndMenu();
         }
 
@@ -455,45 +458,143 @@ void Video::mainMenuBar()
         {
             if (ImGui::MenuItem("Select Audio Device"))
                 LUtil::error("Video", "Select Audio Device not implemented yet");
+
+            if (ImGui::MenuItem("Select Camera Device"))
+                LUtil::error("Video", "Select Camera Device not implemented yet");
         
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Display"))
+        {
+            if (ImGui::MenuItem("Show Heatmap", nullptr, &config.show_heatmap)) {}
+            
+            if (ImGui::MenuItem("Show Heatmap Legend", nullptr, &config.show_heatmap_legend))
+                LUtil::error("Video", "Show Heatmap Legend not implemented yet");
+
+            if (ImGui::MenuItem("Show Max Cursor", nullptr, &config.show_max_cursor))
+                LUtil::error("Video", "Show Max Cursor not implemented yet");  
+                
+            if (ImGui::MenuItem("Light/Dark Mode", nullptr, &config.dark_mode))
+                LUtil::error("Video", "Light/Dark Mode not implemented yet");
+
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Recording"))
+        {
+            if (ImGui::MenuItem("Record Data"))
+                LUtil::error("Video", "Record Data not implemented yet");
+
+            if (ImGui::MenuItem("Record Screen"))
+                LUtil::error("Video", "Record Video not implemented yet");
+            
+            if (ImGui::MenuItem("Record Audio"))
+                LUtil::error("Video", "Record Audio not implemented yet");
+
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
     }
 } // end mainMenuBar
 
-void Video::slider(const char* label, float* value, float min, float max, uint width, uint height, int spacing)
+//=====================================================================================
+
+/* Helper functions for ImGui */
+
+void Video::applyUIStyle()
 {
-    // Get the current cursor position
-    float start_x = ImGui::GetCursorPosX();
-    float start_y = ImGui::GetCursorPosY();
+    // Initialize style element
+    ImGuiStyle& style = ImGui::GetStyle();
 
-    ImGui::BeginGroup(); // Start a new group
-    ImGui::Text("%s", label); // Display the label
-    std::string id = "##" + std::string(label); // Add a unique identifier to the slider
-    ImGui::VSliderFloat(id.c_str(), ImVec2(width, height), value, min, max); // Create a vertical slider
-    ImGui::EndGroup(); // End the group
+    // Set UI element styles
+    style.WindowRounding    = 6.0f;  // Rounds window corners
+    style.ChildRounding     = 6.0f;  // Rounds child windows
+    style.FrameRounding     = 7.0f;  // Rounds buttons, sliders, inputs
+    style.PopupRounding     = 6.0f;  // Rounds popup windows
+    style.ScrollbarRounding = 12.0f; // Rounds scrollbar grab
+    style.GrabRounding      = 4.0f;  // Rounds slider/button grabs
+    style.TabRounding       = 4.0f;  // Rounds tabs
 
-    // Move the cursor to the next slider position
-    ImGui::SetCursorPos(ImVec2(start_x + spacing + width, start_y)); // Move down by the height of the slider plus spacing
-} // end slider
+    // Set UI colors
+    style.Colors[ImGuiCol_Text]                      = LColor::off_white;     // Main text
+    style.Colors[ImGuiCol_TextDisabled]              = LColor::light_grey_t;  // Disabled text
+    style.Colors[ImGuiCol_WindowBg]                  = LColor::dark_grey_t;   // Background of main window
+    style.Colors[ImGuiCol_ChildBg]                   = LColor::medium_grey;   // Panels, child windows
+    style.Colors[ImGuiCol_PopupBg]                   = LColor::medium_grey;   // Popups / dropdowns
+    style.Colors[ImGuiCol_Border]                    = LColor::black;         // Subtle borders
+    style.Colors[ImGuiCol_BorderShadow]              = LColor::black;         // Shadow effect
+    style.Colors[ImGuiCol_FrameBg]                   = LColor::medium_grey;   // Input boxes, sliders background
+    style.Colors[ImGuiCol_FrameBgHovered]            = LColor::sky_blue;      // Hover effect for inputs
+    style.Colors[ImGuiCol_FrameBgActive]             = LColor::red;           // Active input / slider grab
+    style.Colors[ImGuiCol_TitleBg]                   = LColor::black;         // Window title background
+    style.Colors[ImGuiCol_TitleBgActive]             = LColor::sky_blue;      // Active title background
+    style.Colors[ImGuiCol_TitleBgCollapsed]          = LColor::medium_grey;   // Collapsed window
+    style.Colors[ImGuiCol_MenuBarBg]                 = LColor::medium_grey;   // Menu bars
+    style.Colors[ImGuiCol_ScrollbarBg]               = LColor::medium_grey;   // Scroll background
+    style.Colors[ImGuiCol_ScrollbarGrab]             = LColor::off_white;     // Scrollbar handle
+    style.Colors[ImGuiCol_ScrollbarGrabHovered]      = LColor::sky_blue;      // Hovered scrollbar handle
+    style.Colors[ImGuiCol_ScrollbarGrabActive]       = LColor::red;           // Active scrollbar handle
+    style.Colors[ImGuiCol_CheckMark]                 = LColor::red;           // Checkboxes
+    style.Colors[ImGuiCol_SliderGrab]                = LColor::red;           // Slider handle
+    style.Colors[ImGuiCol_SliderGrabActive]          = LColor::pink;          // Active slider handle
+    style.Colors[ImGuiCol_Button]                    = LColor::medium_grey;   // Default button
+    style.Colors[ImGuiCol_ButtonHovered]             = LColor::sky_blue;      // Hovered button
+    style.Colors[ImGuiCol_ButtonActive]              = LColor::red;           // Pressed button
+    style.Colors[ImGuiCol_Header]                    = LColor::medium_grey;   // Collapsing headers
+    style.Colors[ImGuiCol_HeaderHovered]             = LColor::sky_blue;      // Hovered header
+    style.Colors[ImGuiCol_HeaderActive]              = LColor::red;           // Active header
+    style.Colors[ImGuiCol_Separator]                 = LColor::black;         // Separators
+    style.Colors[ImGuiCol_SeparatorHovered]          = LColor::sky_blue;      // Hovered separator
+    style.Colors[ImGuiCol_SeparatorActive]           = LColor::red;           // Active separator
+    style.Colors[ImGuiCol_ResizeGrip]                = LColor::off_white;     // Grip handle
+    style.Colors[ImGuiCol_ResizeGripHovered]         = LColor::sky_blue;      // Hovered grip
+    style.Colors[ImGuiCol_ResizeGripActive]          = LColor::red;           // Active grip
+    style.Colors[ImGuiCol_Tab]                       = LColor::medium_grey;   // Tabs
+    style.Colors[ImGuiCol_TabHovered]                = LColor::sky_blue;      // Hovered tab
+    style.Colors[ImGuiCol_TabActive]                 = LColor::red;           // Active tab
+    style.Colors[ImGuiCol_TabSelected]               = LColor::pink;          // Selected tab
+    style.Colors[ImGuiCol_TabSelectedOverline]       = LColor::sky_blue;      // Small visual indicator
+    style.Colors[ImGuiCol_TabDimmed]                 = LColor::light_grey_t;  // Dimmed tab
+    style.Colors[ImGuiCol_TabDimmedSelected]         = LColor::sky_blue;      // Selected dimmed tab
+    style.Colors[ImGuiCol_PlotLines]                 = LColor::off_white;     // Line plots
+    style.Colors[ImGuiCol_PlotLinesHovered]          = LColor::sky_blue;
+    style.Colors[ImGuiCol_PlotHistogram]             = LColor::off_white;     // Histogram
+    style.Colors[ImGuiCol_PlotHistogramHovered]      = LColor::sky_blue;
+    style.Colors[ImGuiCol_TextSelectedBg]            = LColor::sky_blue;      // Selected text background
+    style.Colors[ImGuiCol_DragDropTarget]            = LColor::sky_blue;      // Drag target highlight
+    style.Colors[ImGuiCol_NavWindowingHighlight]     = LColor::sky_blue;      // Navigation highlight
+    style.Colors[ImGuiCol_NavWindowingDimBg]         = LColor::dark_grey_t;   // Dim background
+    style.Colors[ImGuiCol_ModalWindowDimBg]          = LColor::dark_grey_t;   // Dim modal background
+} // end setUIStyle
+
+ImVec2 Video::windowScale(const int x, const int y)
+{
+    return ImVec2(x * scale.x, y * scale.y);
+} // end windowPos
 
 //=====================================================================================
 
-/* Converts OpenCV Mat to an OpenGL texture to be displayed in ImGui */
+/* Helper functions for OpenCV */
 
 void Video::frametoTexture()
 {
     glBindTexture(GL_TEXTURE_2D, texture_id);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, display_frame.cols, display_frame.rows, GL_RGB, GL_UNSIGNED_BYTE, display_frame.data);
+
+    // Ensure correct byte alignment
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    // Upload the frame
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, display_frame.cols, display_frame.rows, 0, GL_RGB, GL_UNSIGNED_BYTE, display_frame.data);
+
     glBindTexture(GL_TEXTURE_2D, 0);
 } // end frametoTexture
 
-void Video::applyHeatmap(array2D<float>& beamformed_data, const float min, const float max, const float alpha)
+void Video::applyHeatmap(array2D<float>& beamformed_data, const float min, const float max, const float alpha, const ImVec2 camera_size)
 {
-    // Copy the current frame to the display frame
-    current_frame.copyTo(display_frame); 
-
     // Clamp data between min and max
     for (size_t i = 0; i < beamformed_data.dim_1; i++)
     {
@@ -505,8 +606,6 @@ void Video::applyHeatmap(array2D<float>& beamformed_data, const float min, const
                 beamformed_data.at(i, j) = max;
         }
     }
-
-    // Maybe start with heatmap and make everything in place****
 
     // Convert data to cv::Mat
     cv::Mat clamped_data(beamformed_data.dim_1, beamformed_data.dim_2, CV_32F, beamformed_data.data);
@@ -525,8 +624,61 @@ void Video::applyHeatmap(array2D<float>& beamformed_data, const float min, const
     cv::applyColorMap(resized_data, heatmap, cv::COLORMAP_JET); // Apply a colormap to the heatmap data
 
     // Overlay the heatmap onto the current frame using the desired alpha
-    cv::addWeighted(display_frame, 1.0f, heatmap, alpha, 0.0f, display_frame); // Blend the heatmap with the current frame
+    cv::Mat merged_frame;
+    cv::addWeighted(current_frame, 1.0f, heatmap, alpha, 0.0f, merged_frame); // Blend the heatmap with the current frame
 
     // Resize the display frame to the desired size
-    
+    display_frame = resizeAndCrop(merged_frame, camera_size);
 } // end applyHeatmap
+
+cv::Mat Video::resizeAndCrop(const cv::Mat& src, const ImVec2& target_size)
+{
+    int tgt_w = std::max(1, static_cast<int>(target_size.x));
+    int tgt_h = std::max(1, static_cast<int>(target_size.y));
+
+    float src_aspect = static_cast<float>(src.cols) / src.rows;
+    float tgt_aspect = static_cast<float>(tgt_w) / tgt_h;
+
+    cv::Mat resized;
+
+    // Compute scale to fit one dimension
+    float scale;
+    if (src_aspect > tgt_aspect)
+        scale = static_cast<float>(tgt_h) / src.rows; // fit height
+    else
+        scale = static_cast<float>(tgt_w) / src.cols; // fit width
+
+    int new_w = std::max(1, static_cast<int>(src.cols * scale));
+    int new_h = std::max(1, static_cast<int>(src.rows * scale));
+
+    cv::resize(src, resized, cv::Size(new_w, new_h), 0, 0, cv::INTER_LINEAR);
+
+    // Only crop if resized image is bigger than target
+    int x_offset = std::max(0, (new_w - tgt_w) / 2);
+    int y_offset = std::max(0, (new_h - tgt_h) / 2);
+    int crop_w   = std::min(tgt_w, resized.cols - x_offset);
+    int crop_h   = std::min(tgt_h, resized.rows - y_offset);
+
+    cv::Rect roi(x_offset, y_offset, crop_w, crop_h);
+
+    return resized(roi).clone();
+} // end resizeAndCrop
+
+cv::Mat Video::generateLegend(const ImVec2 size)
+{
+    // Create a 256 x 1 gradient
+    cv::Mat gradient(256, 1, CV_8U);
+
+    for (int i = 0; i < gradient.rows; i++)
+        gradient.at<uchar>(i, 0) = static_cast<uchar>(i * 255 / (gradient.rows - 1));
+
+    // Apply colormap to the gradient
+    cv::Mat color_legend;
+    cv::applyColorMap(gradient, color_legend, cv::COLORMAP_JET);
+
+    // Resize the legend
+    cv::Mat resized_legend;
+    cv::resize(color_legend, resized_legend, cv::Size(size.x, size.y), 0, 0, cv::INTER_LINEAR);
+
+    return resized_legend;
+} // end generateLegend

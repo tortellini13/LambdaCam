@@ -25,9 +25,13 @@ namespace LKey
 
     enum bConfig: uint8_t
     {
-        USE_ALSA,
         AUDIO_IS_STREAMING,
-        NUM_BOOL_CONFIGS
+        LIGHT_DARK_MODE,
+        SHOW_HEATMAP,
+        SHOW_HEATMAP_LEGEND,
+        SHOW_MAX_CURSOR,
+        USE_ALSA,
+        NUM_BOOL_CONFIGS,
     };
 
     enum sConfig: uint8_t
@@ -57,8 +61,12 @@ namespace LKey
 
     constexpr const char* bool_config_name[NUM_BOOL_CONFIGS] = 
     {
-        "Use ALSA",
-        "Audio is Streaming"
+        "Audio is Streaming",
+        "Light/Dark Mode",
+        "Show Heatmap",
+        "Show Heatmap Legend",
+        "Show Max Cursor",
+        "Use ALSA"
     };
 
     constexpr const char* string_config_name[NUM_STRING_CONFIGS] = 

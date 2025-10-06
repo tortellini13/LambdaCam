@@ -1,6 +1,10 @@
 {
     "bool_configs": {
         "Audio is Streaming": false,
+        "Light/Dark Mode": false,
+        "Show Heatmap": true,
+        "Show Heatmap Legend": true,
+        "Show Max Cursor": true,
         "Use ALSA": false
     },
     "float_configs": {

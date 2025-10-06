@@ -4,13 +4,12 @@
 // Headers
 #include "Beamform.hpp"
 #include "Structs.hpp"
-#include "ConfigIO.hpp"
-#include "ConfigKey.hpp"
 #include "LambdaUtil.hpp"
+#include "Config.hpp"
 
 //=====================================================================================
 
-Beamform::Beamform(CONFIG &global_config) : 
+Beamform::Beamform(Config &global_config) : 
     config(global_config) // Reference to the global configuration object
 {
     
@@ -33,27 +32,30 @@ float Beamform::degtorad(float angle_deg) const
 bool Beamform::initFFT()
 {
     // Allocate all arrays
-    fft_input_buffer  = (fftwf_complex *)fftwf_malloc(sizeof(fftwf_complex) * config.i(LKey::FFT_FRAME_SIZE)); // Allocate buffer for FFT input
-    fft_output_buffer = (fftwf_complex *)fftwf_malloc(sizeof(fftwf_complex) * config.i(LKey::FFT_FRAME_SIZE)); // Allocate buffer for FFT output
+    fft_input_buffer  = (fftwf_complex *)fftwf_malloc(sizeof(fftwf_complex) * config.fft_frame_size); // Allocate buffer for FFT input
+    fft_output_buffer = (fftwf_complex *)fftwf_malloc(sizeof(fftwf_complex) * config.fft_frame_size); // Allocate buffer for FFT output
 
     // Create FFT plan
-    fft_plan = fftwf_plan_dft_1d(config.i(LKey::FFT_FRAME_SIZE), fft_input_buffer, fft_output_buffer, FFTW_FORWARD, FFTW_ESTIMATE);
+    fft_plan = fftwf_plan_dft_1d(config.fft_frame_size, fft_input_buffer, fft_output_buffer, FFTW_FORWARD, FFTW_ESTIMATE);
 
     return true;
 } // end initFFT
 
 bool Beamform::initDirectivity()
 {
-    // Cache values from config
-    int fov_theta        = config.i(LKey::FOV_THETA);
-    int fov_phi          = config.i(LKey::FOV_PHI);
-    int angle_resolution = config.i(LKey::ANGLE_RESOLUTION);
-    int m_channels       = config.i(LKey::M_CHANNELS);
-    int n_channels       = config.i(LKey::N_CHANNELS);
-    int fft_frame_size   = config.i(LKey::FFT_FRAME_SIZE);
-    int sample_rate      = config.i(LKey::SAMPLE_RATE);
-    float mic_spacing_m  = config.f(LKey::MIC_SPACING_M);
-    float speed_of_sound = 343.0f; // Speed of sound in air at 20 degrees Celsius
+    // Clear directovity factor array
+    directivity_factor.fill(0.0f);
+
+    // Cache values from config for ease of use
+    int fov_theta        = config.fov_theta;
+    int fov_phi          = config.fov_phi;
+    int angle_resolution = config.angle_resolution;
+    int m_channels       = config.m_channels;
+    int n_channels       = config.n_channels;
+    int fft_frame_size   = config.fft_frame_size;
+    int sample_rate      = config.sample_rate;
+    float mic_spacing_m  = config.mic_spacing;
+    float speed_of_sound = 343.0f; // Speed of sound in air at 20 degrees Celsius in m/s
 
     int half_fov_theta = fov_theta / 2;
     int half_fov_phi   = fov_phi / 2;
@@ -75,7 +77,7 @@ bool Beamform::initDirectivity()
                     {
                         // Computes steering vector for beamforming
                         float frequency = static_cast<float>(sample_rate * bin) / static_cast<float>(fft_frame_size);
-                        float wave_number = (2 * M_PI * frequency) / speed_of_sound;
+                        float wave_number = (2.0f * M_PI * frequency) / speed_of_sound;
                         float exponent = wave_number * mic_spacing_m * (static_cast<float>(m) * sinf(degtorad(theta)) + static_cast<float>(n) * sinf(degtorad(phi)));
                         float real = cosf(exponent);
                         float imag = -sinf(exponent);
@@ -101,13 +103,13 @@ bool Beamform::initDirectivity()
 bool Beamform::initBeamform()
 {
     // Allocate memory for arrays
-    int num_theta = (config.i(LKey::FOV_THETA) / config.i(LKey::ANGLE_RESOLUTION)) + 1; // +1 to include both ends
-    int num_phi   = (config.i(LKey::FOV_PHI) / config.i(LKey::ANGLE_RESOLUTION)) + 1;   // +1 to include both ends
+    int num_theta = (config.fov_theta / config.angle_resolution) + 1; // +1 to include both ends
+    int num_phi   = (config.fov_phi / config.angle_resolution) + 1;   // +1 to include both ends
 
-    hamming_weights = new float[config.i(LKey::FFT_FRAME_SIZE)];
-    directivity_factor.resize(num_theta, num_phi, config.i(LKey::M_CHANNELS), config.i(LKey::N_CHANNELS), config.i(LKey::FFT_FRAME_SIZE));
-    data_beamform.resize(num_theta, num_phi, config.i(LKey::FFT_FRAME_SIZE));
-    data_fft.resize(num_theta, num_phi, config.i(LKey::FFT_FRAME_SIZE));
+    hamming_weights = new float[config.fft_frame_size];
+    directivity_factor.resize(num_theta, num_phi, config.m_channels, config.n_channels, config.fft_frame_size);
+    data_beamform.resize(num_theta, num_phi, config.fft_frame_size);
+    data_fft.resize(num_theta, num_phi, config.fft_frame_size);
 
     // Initialize FFT and directivity factor
     if (!initFFT())
@@ -182,8 +184,8 @@ void Beamform::performFFT()
             for (size_t bin = 0; bin < data_fft.dim_3; bin++)
             {
                 // Normalize output
-                float real = fft_output_buffer[bin][0] / config.i(LKey::FFT_FRAME_SIZE);
-                float imag = fft_output_buffer[bin][1] / config.i(LKey::FFT_FRAME_SIZE);
+                float real = fft_output_buffer[bin][0] / config.fft_frame_size;
+                float imag = fft_output_buffer[bin][1] / config.fft_frame_size;
 
                 // 20 * log10(signal)
                 float arg = real * real + imag * imag;

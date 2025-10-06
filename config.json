@@ -1,23 +1,22 @@
 {
-    "bool_configs": {
-        "Audio is Streaming": false,
-        "Use ALSA": false
-    },
-    "float_configs": {
-        "Mic Spacing (m)": 0.029999999329447746
-    },
-    "int_configs": {
-        "Angle Resolution": 2,
-        "FFT Frame Size": 1024,
-        "FOV Phi": 30,
-        "FOV Theta": 30,
-        "M Channels": 4,
-        "N Channels": 4,
-        "Sample Rate": 48000
-    },
-    "string_configs": {
-        "Channel Order": "44a820b931ec64fd75",
-        "Recordings Directory": "recordings/",
-        "Wav File Name": "test1k.wav"
-    }
+    "alpha": 0.41200000047683716,
+    "angle_resolution": 2,
+    "audio_is_streaming": false,
+    "channel_order": "44a820b931ec64fd75",
+    "dark_mode": true,
+    "fft_frame_size": 1024,
+    "fov_phi": 30,
+    "fov_theta": 30,
+    "m_channels": 4,
+    "max": 0.0,
+    "mic_spacing": 0.029999999329447746,
+    "min": -100.0,
+    "n_channels": 4,
+    "recordings_dir": "recordings/",
+    "sample_rate": 48000,
+    "show_heatmap": true,
+    "show_heatmap_legend": true,
+    "show_max_cursor": true,
+    "use_alsa": false,
+    "wav_file_name": "test1k.wav"
 }

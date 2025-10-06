@@ -1,17 +1,18 @@
 #pragma once
 
-#include <thread>      // For multithreading
-#include <atomic>      // For atomic variables
+#include <thread>           // For multithreading
+#include <atomic>           // For atomic variables
 #include <alsa/asoundlib.h> // ALSA
-#include <chrono>      // For time aligning AudioFile stream
-#include "Structs.hpp" // Custom structs and enums
-#include "AudioFile.h" // For reading from a wav file
+#include <chrono>           // For time aligning AudioFile stream
+#include "Structs.hpp"      // Custom structs and enums
+#include "AudioFile.h"      // For reading from a wav file
+#include "Config.hpp"       // Config struct
 
 class Audio
 {
 public:
     // Constructor and destructor
-    Audio(CONFIG& global_config);
+    Audio(Config& global_config);
     ~Audio();
 
     // Initializes audio settings
@@ -21,8 +22,9 @@ public:
     void startAudioStream();
     void stopAudioStream();
 
-    // Access ring buffer
-    void accessRingBuffer(array3D<float>& data_output_1, array3D<float>& data_output_2);
+    // Data buffers
+    array3D<float> read_buffer;
+    array3D<float> write_buffer;
 
 private:
     // Stream audio with ALSA
@@ -35,16 +37,14 @@ private:
     bool initALSA();
     bool initAudioFile();
 
+    // Saves audio to file
+    void exportFromWavFile(const int channel); // Exports one channel from existing wav file
+
     // Global configuration object
-    CONFIG &config; // Reference to the global configuration object
+    Config &config; // Reference to the global configuration object
 
     // General Member Variables
-    int m_channels;                 // Number of microphones in the m direction
-    int n_channels;                 // Number of microphones in the n direction
     array2D<int> channel_order;     // Physical channels may not be in correct order
-
-    array3D<float> data_buffer_1;   // Buffer for audio data
-    array3D<float> data_buffer_2;   // Buffer for audio data
 
     // Member variables for ALSA
     snd_pcm_t *pcm_handle;          // pcm handle

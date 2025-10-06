@@ -85,10 +85,12 @@ Highlighted = Awaiting feature, control in place
 		- [ ] ==Save Recording==
 		- [ ] ==Open Recording==
 	- [ ] Settings
-		- [ ] Select Audio Device
+		- [ ] ==Select Audio Device==
 	- [ ] Overlay
-		- [ ] Heatmap on/off
-		- [ ] Heatmap Key on/off
+		- [ ] ==Toggle Heatmap==
+		- [ ] ==Toggle Heatmap Legend==
+		- [ ] ==Toggle Max Cursor==
+		- [ ] ==Light/Dark Mode==
 - [ ] Display
 	- [ ] Heatmap Legend
 	- [ ] Debug menu (popout?)

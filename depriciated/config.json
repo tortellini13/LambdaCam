@@ -1,0 +1,27 @@
+{
+    "bool_configs": {
+        "Audio is Streaming": false,
+        "Light/Dark Mode": false,
+        "Show Heatmap": true,
+        "Show Heatmap Legend": true,
+        "Show Max Cursor": true,
+        "Use ALSA": false
+    },
+    "float_configs": {
+        "Mic Spacing (m)": 0.029999999329447746
+    },
+    "int_configs": {
+        "Angle Resolution": 2,
+        "FFT Frame Size": 1024,
+        "FOV Phi": 30,
+        "FOV Theta": 30,
+        "M Channels": 4,
+        "N Channels": 4,
+        "Sample Rate": 48000
+    },
+    "string_configs": {
+        "Channel Order": "44a820b931ec64fd75",
+        "Recordings Directory": "recordings/",
+        "Wav File Name": "test1k.wav"
+    }
+}

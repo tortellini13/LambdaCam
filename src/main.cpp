@@ -6,8 +6,7 @@
 #include "Video.hpp"      // Camera and GUI rendering
 #include "Beamform.hpp"   // Beamforming and audio processing
 #include "LambdaUtil.hpp" // Utility functions for LambdaCam
-#include "ConfigIO.hpp"   // Config file reading/writing
-#include "ConfigKey.hpp"  // Names and keys for each config
+#include "Config.hpp"     // Config struct
 #include "Structs.hpp"    // Custom structs
 
 int main()
@@ -15,93 +14,48 @@ int main()
     // Create a gap in the console so it is easier to see output
     std::cout << "\n";
 
-    array2D<int> channel_order_test(4, 4);
-
-    channel_order_test.at(0, 0) = 10;
-    channel_order_test.at(0, 1) = 8;
-    channel_order_test.at(0, 2) = 2;
-    channel_order_test.at(0, 3) = 0;
-
-    channel_order_test.at(1, 0) = 11;
-    channel_order_test.at(1, 1) = 9;
-    channel_order_test.at(1, 2) = 3;
-    channel_order_test.at(1, 3) = 1;
-
-    channel_order_test.at(2, 0) = 14;
-    channel_order_test.at(2, 1) = 12;
-    channel_order_test.at(2, 2) = 6;
-    channel_order_test.at(2, 3) = 4;
-
-    channel_order_test.at(3, 0) = 15;
-    channel_order_test.at(3, 1) = 13;
-    channel_order_test.at(3, 2) = 7;
-    channel_order_test.at(3, 3) = 5;
-
-    std::string order = LUtil::packChannelOrder(channel_order_test);
-    std::cout << "Order: " << order << "\n";
-
     //=====================================================================================
 
     /* Initialize configs */
 
-    // Global config object
-    CONFIG global_config(
-        static_cast<size_t>(LKey::NUM_INT_CONFIGS), 
-        static_cast<size_t>(LKey::NUM_FLOAT_CONFIGS), 
-        static_cast<size_t>(LKey::NUM_BOOL_CONFIGS), 
-        static_cast<size_t>(LKey::NUM_STRING_CONFIGS));
-
-    // Read from default configs
-    if (!ConfigIO::readConfig(global_config, true))
-    {
-        LUtil::error("Main", "Failed to read default config");
-        return 1;
-    }
-
-    // Read from user configs and overwrite defaults if availible
-    if (!ConfigIO::readConfig(global_config))
-    {
-        LUtil::error("Main", "Failed to read user configs");
-        return 1;
-    }
-
-    // Write config to ensure it has all variables
-    if (!ConfigIO::writeConfig(global_config))
-    {
-        LUtil::error("Main", "Failed to write config");
-        return 1;
-    } 
+    std::cout << "Initializing configs...\n";
+    Config global_config;  // Create global config object with defaults
+    global_config.read();  // Read from config file if available
+    global_config.write(); // Write to config file to ensure all variables are present
 
     //=====================================================================================
 
     /* Allocate memory for buffers */
 
     // Audio data buffers
+    std::cout << "Allocating memory for audio buffers...\n";
     array3D<float> audio_data_buffer_1(
-        global_config.i(LKey::M_CHANNELS), 
-        global_config.i(LKey::N_CHANNELS), 
-        global_config.i(LKey::FFT_FRAME_SIZE));
+        global_config.m_channels,
+        global_config.n_channels,
+        global_config.fft_frame_size);
+
     array3D<float> audio_data_buffer_2(
-        global_config.i(LKey::M_CHANNELS), 
-        global_config.i(LKey::N_CHANNELS), 
-        global_config.i(LKey::FFT_FRAME_SIZE));
+        global_config.m_channels,
+        global_config.n_channels,
+        global_config.fft_frame_size);
     
     // Beamforming output buffer
     array2D<float> beamform_data_buffer(
-        global_config.i(LKey::FOV_THETA),
-        global_config.i(LKey::FOV_PHI));
+        global_config.fov_theta,
+        global_config.fov_phi);
 
     //=====================================================================================
 
     /* Initialize classes */
 
     // Test data***
-    array2D<float> test_input_data(100, 100);
+    array2D<float> test_input_data(global_config.fov_theta, global_config.fov_phi);
     test_input_data.fill(-45.0f);
     float time = 0.0f;
 
     // Initialize video class and dispatch thread to record video
-    Video video; 
+    std::cout << "Initializing video...\n";
+    Video video(global_config); 
     if (!video.startVideo())
     {
         LUtil::error("Main", "Failed to start video capture");
@@ -109,6 +63,7 @@ int main()
     }
 
     // Initialize the audio class
+    std::cout << "Initializing audio...\n";
     Audio audio(global_config);
     if (!audio.initAudio())
     {
@@ -117,6 +72,7 @@ int main()
     }
 
     // Initialize the beamform class
+    std::cout << "Initializing beamforming...\n";
     Beamform beamform(global_config);
     if (!beamform.initBeamform())
     {
@@ -131,21 +87,40 @@ int main()
     // Dispatch a thread to stream audio from ALSA or AudioFile
     audio.startAudioStream();
 
+    array2D<int> unpacked_order = LUtil::unpackChannelOrder(global_config.channel_order);
+    std::cout << "Mic Order:\n";
+    unpacked_order.print();
+
     std::cout << "\n==================== Starting main loop ====================\n";
     // Main loop
     while (video.video_running)
     {
-        LUtil::radialGradient(test_input_data, -100, 0, time); // Generate a radial gradient***testing
-
-        // Copy audio stream into main thread
-        audio.accessRingBuffer(audio_data_buffer_1, audio_data_buffer_2);
+        LUtil::radialGradient(test_input_data, 0, -100, time); // Generate a radial gradient***testing
 
         // Perform beamforming algorithm to audio data
-        beamform.processAudioFrame(audio_data_buffer_1, beamform_data_buffer, 40);
+        beamform.processAudioFrame(audio.read_buffer, beamform_data_buffer, 40);
+
+        // Check magnitudes of audio input buffer for debugging
+        array2D<float> channel_magnitudes(audio.read_buffer.dim_1, audio.read_buffer.dim_2);
+        channel_magnitudes.fill(0.0f);
+        for (size_t m = 0; m < audio.read_buffer.dim_1; m++)
+        {
+            for (size_t n = 0; n < audio.read_buffer.dim_2; n++)
+            {
+                for (size_t b = 0; b < audio.read_buffer.dim_3; b++)
+                {
+                    channel_magnitudes.at(m, n) += std::abs(audio.read_buffer.at(m, n, b));
+                }
+                channel_magnitudes.at(m, n) /= static_cast<float>(audio.read_buffer.dim_3);
+            }
+        }
+
+        // channel_magnitudes.print();
+        // std::cout << "--------------------------\n";
 
         // Draw the UI and create a heatmap
-        // if(!video.processFrame(beamform_data_buffer, -100, 0, 0.5f))
-        if (!video.processFrame(test_input_data, -100, 0, 0.5f))
+        if(!video.processFrame(beamform_data_buffer))
+        // if (!video.processFrame(test_input_data))
         {
             LUtil::error("Main", "Failed to process frame");
             break;

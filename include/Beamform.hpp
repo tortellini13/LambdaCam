@@ -1,13 +1,14 @@
 #pragma once
 
 #include "Structs.hpp"
+#include "Config.hpp"
 #include <fftw3.h>
 
 class Beamform
 {
 public:
     // Constructor and destructor
-    Beamform(CONFIG &global_config);
+    Beamform(Config &global_config);
     ~Beamform();
 
     // Initializes beamforming constants and FFT
@@ -29,7 +30,7 @@ private:
     float degtorad(float angle_deg) const; // Converts degrees to radians
 
     // Global configuration object
-    CONFIG &config; // Reference to the global configuration object
+    Config &config; // Reference to the global configuration object
 
     // FFT variables
     fftwf_plan fft_plan;              // FFT plan for reusing

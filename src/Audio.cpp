@@ -6,27 +6,23 @@
 #include "Audio.hpp"
 #include "Structs.hpp"
 #include "LambdaUtil.hpp"
-#include "ConfigIO.hpp"
-#include "ConfigKey.hpp" 
 #include "AudioFile.h"
 
 //=====================================================================================
 
 /* Class constructors and destructors */
 
-Audio::Audio(CONFIG& global_config) :
+Audio::Audio(Config& global_config) :   
+    read_buffer(global_config.m_channels, global_config.n_channels, global_config.fft_frame_size), // Buffer for audio data
+    write_buffer(global_config.m_channels, global_config.n_channels, global_config.fft_frame_size), // Buffer for audio data
+
     config(global_config), // Reference to the global configuration object
 
-    m_channels(global_config.i(LKey::M_CHANNELS)), // Number of microphones in the m direction
-    n_channels(global_config.i(LKey::N_CHANNELS)), // Number of microphones in the
-    channel_order(m_channels, n_channels),  // Physical channel order to remap
+    channel_order(config.m_channels, config.n_channels), // Physical channel order to remap
 
-    data_buffer_1(m_channels, n_channels, global_config.i(LKey::FFT_FRAME_SIZE)), // Buffer for audio data
-    data_buffer_2(m_channels, n_channels, global_config.i(LKey::FFT_FRAME_SIZE)), // Buffer for audio data
-
-    pcm_name("hw:0,0"),                            // Default ALSA device
-    frames(global_config.i(LKey::FFT_FRAME_SIZE)), // Number of frames per period
-    buffer_size(m_channels * n_channels * frames)  // Size of buffer from ALSA
+    pcm_name("hw:0,0"),            // Default ALSA device
+    frames(config.fft_frame_size), // Number of frames per period
+    buffer_size(config.m_channels * config.n_channels * frames)  // Size of buffer from ALSA
 
 {} // end Audio constructor
 
@@ -84,7 +80,7 @@ bool Audio::initALSA()
     }
 
     // Set sample rate
-    exact_rate = config.i(LKey::SAMPLE_RATE);
+    exact_rate = config.sample_rate;
     if (snd_pcm_hw_params_set_rate_near(pcm_handle, hw_params, &exact_rate, &dir) < 0)
     {
         LUtil::error("Audio", "Failed to set sample rate for PCM device");
@@ -92,13 +88,13 @@ bool Audio::initALSA()
     }
 
     // If specified rate is not available, set to nearest rate
-    if (config.i(LKey::SAMPLE_RATE) != static_cast<int>(exact_rate))
+    if (config.sample_rate != static_cast<int>(exact_rate))
     {
-        LUtil::error("Audio", "The sample rate " + std::to_string(config.i(LKey::SAMPLE_RATE)) + " is not supported. Using " + to_string(exact_rate) + " instead");
+        LUtil::error("Audio", "The sample rate " + std::to_string(config.sample_rate) + " is not supported. Using " + to_string(exact_rate) + " instead");
     }
 
     // Set number of channels
-    if (snd_pcm_hw_params_set_channels(pcm_handle, hw_params, config.i(LKey::M_CHANNELS) * config.i(LKey::N_CHANNELS)) < 0)
+    if (snd_pcm_hw_params_set_channels(pcm_handle, hw_params, config.m_channels * config.n_channels) < 0)
     {
         LUtil::error("Audio", "Failed to set the numer of channels for the PCM device");
         return false;
@@ -132,14 +128,15 @@ bool Audio::initALSA()
 // Initialize AudioFile
 bool Audio::initAudioFile()
 {
-    if (!audio_stream.load(config.s(LKey::RECORDINGS_DIR) + config.s(LKey::WAV_FILE_NAME)))
+    if (!audio_stream.load(config.recordings_dir + config.wav_file_name))
     {
-        LUtil::error("Audio", "Failed to load the audio file " + config.s(LKey::WAV_FILE_NAME));
+        LUtil::error("Audio", "Failed to load the audio file " + config.wav_file_name);
         return false;
     }
+    std::cout << "Audio: " << config.recordings_dir + config.wav_file_name << "\n";
 
     // Read the details of the file. May want to use these to compare to settings
-    config.i(LKey::SAMPLE_RATE) = audio_stream.getSampleRate();
+    config.sample_rate = audio_stream.getSampleRate();
 
     std::cout << "Audio: Finished initializing AudioFile\n";
 
@@ -150,23 +147,23 @@ bool Audio::initAudioFile()
 bool Audio::initAudio()
 {
     // Read from configs
-    ConfigIO::readConfig(config);
+    config.read();
 
     // Remap channel order
-    channel_order = LUtil::unpackChannelOrder(config.s(LKey::CHANNEL_ORDER));
+    channel_order = LUtil::unpackChannelOrder(config.channel_order);
 
     // Clear buffers
-    data_buffer_1.fill(0.0f);
-    data_buffer_2.fill(0.0f);
+    read_buffer.fill(0.0f);
+    write_buffer.fill(0.0f);
 
     std::string audio_backend = "ALSA";
-    if (!config.b(LKey::USE_ALSA))
+    if (!config.use_alsa)
         audio_backend = "AudioFile";
 
     std::cout << "Audio: Initializing " << audio_backend << " audio backend\n";
 
     // Initialize desired audio backend
-    if (config.b(LKey::USE_ALSA))
+    if (config.use_alsa)
     {
         if (!initALSA())
         {
@@ -196,24 +193,24 @@ void Audio::startAudioStream()
 {
     // Set streaming flag
     is_streaming = true;
-    config.b(LKey::AUDIO_IS_STREAMING) = is_streaming;
+    config.audio_is_streaming = is_streaming;
 
     // Dispatch a thread and start streaming audio from ALSA
-    if (config.b(LKey::USE_ALSA))
+    if (config.use_alsa)
         streaming_thread = std::thread(&Audio::streamAudioALSA, this);
 
     // Dispatch a thread and start streaming audio from a file
     else
         streaming_thread = std::thread(&Audio::streamAudioFile, this);
     
-} // end startAudio
+} // end startAudioStream
 
 // Merge the audio thread and stop audio stream
 void Audio::stopAudioStream()
 {
     // Set streaming flag
     is_streaming = false;
-    config.b(LKey::AUDIO_IS_STREAMING) = is_streaming;
+    config.audio_is_streaming = is_streaming;
 
     // Merge thread
     if (streaming_thread.joinable())
@@ -228,10 +225,10 @@ void Audio::stopAudioStream()
 // Stream audio with ALSA
 void Audio::streamAudioALSA()
 {
-    while (config.b(LKey::AUDIO_IS_STREAMING))
+    while (config.audio_is_streaming)
     {
         // Swap data from buffer_2 to buffer_1
-        swap(data_buffer_1.data, data_buffer_2.data);
+        swap(read_buffer.data, write_buffer.data);
 
         // Read data from microphones into interlaced buffer
         pcm_return = snd_pcm_readi(pcm_handle, input_buffer, frames);
@@ -264,13 +261,13 @@ void Audio::streamAudioALSA()
         }
 
         // Remap the data to not-interlaced floats and normalize (-1, 1)
-        for (size_t m = 0; m < data_buffer_2.dim_1; m++)
+        for (size_t m = 0; m < write_buffer.dim_1; m++)
         {
-            for (size_t n = 0; n < data_buffer_2.dim_2; n++)
+            for (size_t n = 0; n < write_buffer.dim_2; n++)
             {
-                for (size_t b = 0; b < data_buffer_2.dim_3; b++)
+                for (size_t b = 0; b < write_buffer.dim_3; b++)
                 {
-                    data_buffer_2.at(m, n, b) = static_cast<float>(input_buffer[b * m_channels * n_channels + channel_order.at(m, n)]) / static_cast<float>(1 << 31);
+                    write_buffer.at(m, n, b) = static_cast<float>(input_buffer[b * config.m_channels * config.n_channels + channel_order.at(m, n)]) / static_cast<float>(1 << 31);
                 } // end m
             } // end n
         } // end b
@@ -280,44 +277,71 @@ void Audio::streamAudioALSA()
 // Stream audio with AudioFile
 void Audio::streamAudioFile()
 {
-    int stream_frame_counter = 0; // Frame counter for audio stream
-    while (config.b(LKey::AUDIO_IS_STREAMING))
-    {
-        swap(data_buffer_1.data, data_buffer_2.data);
+    std::cout << "Audio: Starting AudioFile stream\n";
+    int frame_counter = 0;
+    float time_align_delay = static_cast<float>(config.fft_frame_size) / static_cast<float>(audio_stream.getSampleRate());
 
-        // Loops wav file when it reaches the end
-        if ((stream_frame_counter + data_buffer_2.dim_3) >= audio_stream.samples[0].size())
+    while (is_streaming)
+    {
+        // Swap buffers
+        swap(read_buffer.data, write_buffer.data);
+
+        // Return to the beginning of the wav file when done reading
+        if ((frame_counter * config.sample_rate) + static_cast<int>(write_buffer.dim_3) > audio_stream.getNumSamplesPerChannel())
         {
-            stream_frame_counter = 0;
-            std::cout << "Audio: Repeating Wav File...\n";
+            frame_counter = 0;
+            std::cout << "Repeating Wav File...\n";
         }
 
-        for (size_t m = 0; m < data_buffer_2.dim_1; m++)
+        // Read audio file into buffer
+        for (size_t m = 0; m < write_buffer.dim_1; m++)
         {
-            for (size_t n = 0; n < data_buffer_2.dim_2; n++)
+            for (size_t n = 0; n < write_buffer.dim_2; n++)
             {
-                for (size_t b = 0; b < data_buffer_2.dim_3; b++)
+                for (size_t b = 0; b < write_buffer.dim_3; b++)
                 {
-                    data_buffer_2.at(m, n, b) =
-                        audio_stream.samples[channel_order.at(m, n)][stream_frame_counter + b];
+                    write_buffer.at(m, n, b) = 
+                        audio_stream.samples[channel_order.at(m, n)]
+                                            [frame_counter * config.fft_frame_size + b];
                 }
             }
+            // std::cout << "Buffer at (1, 3, 46): " << write_buffer.at(1, 3, 46) << "\n";
         }
 
-        stream_frame_counter += data_buffer_2.dim_3;
+        frame_counter++;
 
-        float time_align_delay = static_cast<float>(data_buffer_2.dim_3) / static_cast<float>(config.i(LKey::SAMPLE_RATE));
+        // Delay reading the next frame to playback in realtime
         std::this_thread::sleep_for(std::chrono::duration<float>(time_align_delay));
     }
+
+    std::cout << "Audio: Ending AudioFile stream\n";
 } // end streamAudioFile
 
 //=====================================================================================
 
-/* Copy ring buffers to main thread */
+/* Record audio and audio data */
 
-// Access ring buffer
-void Audio::accessRingBuffer(array3D<float>& data_output_1, array3D<float>& data_output_2)
+// Exports one channel from exisiting wav file
+void Audio::exportFromWavFile(const int channel)
 {
-    data_output_1 = data_buffer_1;
-    data_output_2 = data_buffer_2;
-} // end accessRingBuffer
+    if (channel >= audio_stream.getNumChannels() || channel < 0)
+        LUtil::error("Audio", "Invalid channel selection (" + std::to_string(channel) + ")");
+
+    // Create Audiofile for output and set parameters
+    AudioFile<float> output;
+    output.setBitDepth(audio_stream.getBitDepth());
+    output.setNumChannels(1);
+    output.setSampleRate(audio_stream.getSampleRate());
+    output.setNumSamplesPerChannel(audio_stream.getNumSamplesPerChannel());
+
+    // Copy samples from audio stream
+    for (int i = 0; i < audio_stream.getNumSamplesPerChannel(); i++)
+        output.samples[0][i] = audio_stream.samples[channel][i];
+
+    if (!output.save("export.wav", AudioFileFormat::Wave))
+        LUtil::error("Audio", "Failed to export audio to file");
+
+    else
+        std::cout << "Audio exported to file\n";
+
+} // end exportFromWavFile
