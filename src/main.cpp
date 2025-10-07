@@ -22,28 +22,7 @@ int main()
     Config global_config;  // Create global config object with defaults
     global_config.read();  // Read from config file if available
     global_config.write(); // Write to config file to ensure all variables are present
-
-    //=====================================================================================
-
-    /* Allocate memory for buffers */
-
-    // Audio data buffers
-    std::cout << "Allocating memory for audio buffers...\n";
-    array3D<float> audio_data_buffer_1(
-        global_config.m_channels,
-        global_config.n_channels,
-        global_config.fft_frame_size);
-
-    array3D<float> audio_data_buffer_2(
-        global_config.m_channels,
-        global_config.n_channels,
-        global_config.fft_frame_size);
     
-    // Beamforming output buffer
-    array2D<float> beamform_data_buffer(
-        global_config.fov_theta,
-        global_config.fov_phi);
-
     //=====================================================================================
 
     /* Initialize classes */
@@ -98,7 +77,7 @@ int main()
         LUtil::radialGradient(test_input_data, 0, -100, time); // Generate a radial gradient***testing
 
         // Perform beamforming algorithm to audio data
-        beamform.processAudioFrame(audio.read_buffer, beamform_data_buffer, 40);
+        beamform.processAudioFrame(audio.read_buffer, 40);
 
         // Check magnitudes of audio input buffer for debugging
         array2D<float> channel_magnitudes(audio.read_buffer.dim_1, audio.read_buffer.dim_2);
@@ -116,10 +95,12 @@ int main()
         }
 
         // channel_magnitudes.print();
-        // std::cout << "--------------------------\n";
+        std::cout << "--------------------------\n";
+
+        beamform.output_buffer.print();
 
         // Draw the UI and create a heatmap
-        if(!video.processFrame(beamform_data_buffer))
+        if(!video.processFrame(beamform.output_buffer))
         // if (!video.processFrame(test_input_data))
         {
             LUtil::error("Main", "Failed to process frame");

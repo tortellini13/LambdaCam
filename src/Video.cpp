@@ -403,7 +403,7 @@ bool Video::renderImGui(array2D<float>& beamformed_data)
         {
             float value = beamformed_data.at(dataY, dataX);
             ImGui::BeginTooltip();
-            ImGui::Text("( %d, %d) %.2f", dataX, dataY, value);
+            ImGui::Text("(%d, %d) %.2f", dataX, dataY, value);
             ImGui::EndTooltip();
         }
     }

@@ -15,7 +15,10 @@ public:
     bool initBeamform();
 
     // Performs beamforming, FFT, and audio post-processing
-    void processAudioFrame(array3D<float> &data_input, array2D<float>& data_output, const int frequency_bin);
+    void processAudioFrame(array3D<float> &data_input, const int frequency_bin);
+
+    // Final beamformed and FFT applied output
+    array2D<float> output_buffer; // (theta, phi)
 
 private:
     // Initialize FFT and beamforming constants

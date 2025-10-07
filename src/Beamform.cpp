@@ -50,8 +50,6 @@ bool Beamform::initDirectivity()
     int fov_theta        = config.fov_theta;
     int fov_phi          = config.fov_phi;
     int angle_resolution = config.angle_resolution;
-    int m_channels       = config.m_channels;
-    int n_channels       = config.n_channels;
     int fft_frame_size   = config.fft_frame_size;
     int sample_rate      = config.sample_rate;
     float mic_spacing_m  = config.mic_spacing;
@@ -59,21 +57,18 @@ bool Beamform::initDirectivity()
 
     int half_fov_theta = fov_theta / 2;
     int half_fov_phi   = fov_phi / 2;
-    
-    int num_theta = (fov_theta / angle_resolution) + 1; // +1 to include both ends
-    int num_phi   = (fov_phi / angle_resolution) + 1;   // +1 to include both ends
 
-    for (int theta_index = 0; theta_index < num_theta; theta_index++)
+    for (size_t theta_index = 0; theta_index < directivity_factor.dim_1; theta_index++)
     {
         float theta = -half_fov_theta + theta_index * angle_resolution;
-        for (int phi_index = 0; phi_index < num_phi; phi_index++)
+        for (size_t phi_index = 0; phi_index < directivity_factor.dim_2; phi_index++)
         {
             float phi = -half_fov_phi + phi_index * angle_resolution;
-            for (int m = 0; m < m_channels; m++)
+            for (size_t m = 0; m < directivity_factor.dim_3; m++)
             {
-                for (int n = 0; n < n_channels; n++)
+                for (size_t n = 0; n < directivity_factor.dim_4; n++)
                 {
-                    for (int bin = 0; bin < fft_frame_size; bin++)
+                    for (size_t bin = 0; bin < directivity_factor.dim_5; bin++)
                     {
                         // Computes steering vector for beamforming
                         float frequency = static_cast<float>(sample_rate * bin) / static_cast<float>(fft_frame_size);
@@ -82,15 +77,7 @@ bool Beamform::initDirectivity()
                         float real = cosf(exponent);
                         float imag = -sinf(exponent);
 
-                        // std::cout << "real: " << real << " | imag: " << imag << "\n";
-
-                        // std::cout << "theta: " << directivity_factor.dim_1 << " | phi: " << directivity_factor.dim_2 << " | m: " << directivity_factor.dim_3 << " | n: " << directivity_factor.dim_4 << " | bin: " << directivity_factor.dim_5 << "\n";
-                        // std::cout << "theta: " << num_theta << " | phi: " << num_phi << " | m: " << m_channels << " | n: " << n_channels << " | bin: " << fft_frame_size << "\n";
-                        // std::cout << "theta: " << theta_index << " | phi: " << phi_index << " | m: " << m << " | n: " << n << " | bin: " << bin << "\n";
-                        
                         directivity_factor.at(theta_index, phi_index, m, n, bin) = complex<float>(real, imag);
-
-                        // std::cout << "Wrote directivity\n";
                     }
                 } 
             }
@@ -110,6 +97,20 @@ bool Beamform::initBeamform()
     directivity_factor.resize(num_theta, num_phi, config.m_channels, config.n_channels, config.fft_frame_size);
     data_beamform.resize(num_theta, num_phi, config.fft_frame_size);
     data_fft.resize(num_theta, num_phi, config.fft_frame_size);
+    output_buffer.resize(num_theta, num_phi);
+
+    // Clear arrays
+    directivity_factor.fill(complex<float>(0.0f, 0.0f));
+    data_beamform.fill(complex<float>(0.0f, 0.0f));
+    data_fft.fill(0.0f);
+    output_buffer.fill(0.0f);
+
+    // Setup Hamming window
+    for (int b = 0; b < config.fft_frame_size; b++)
+    {
+        float a0 = (25.0f / 46.0f); // Magic numbers
+        hamming_weights[b] = a0 - (1.0f - a0) * cosf((2 * M_PI * static_cast<float>(b)) / static_cast<float>(config.fft_frame_size - 1));
+    }
 
     // Initialize FFT and directivity factor
     if (!initFFT())
@@ -172,9 +173,9 @@ void Beamform::performFFT()
             for (size_t b = 0; b < data_beamform.dim_3; b++)
             {
                 // Apply Hamming window then extract real and imaginary parts
-                std::complex<float> sample = data_beamform.at(theta, phi, b) * hamming_weights[b];
-                fft_input_buffer[b][0] = real(sample);
-                fft_input_buffer[b][1] = imag(sample);
+                std::complex<float> sample = data_beamform.at(theta, phi, b);
+                fft_input_buffer[b][0] = real(sample) * hamming_weights[b];
+                fft_input_buffer[b][1] = imag(sample) * hamming_weights[b];
             }
 
             // Execute fft plan on buffer
@@ -197,7 +198,7 @@ void Beamform::performFFT()
 
 //=====================================================================================
 
-void Beamform::processAudioFrame(array3D<float> &data_input, array2D<float>& data_output, const int frequency_bin)
+void Beamform::processAudioFrame(array3D<float> &data_input, const int frequency_bin)
 {
     // Beamform incoming data from mic array
     applyBeamforming(data_input, frequency_bin);
@@ -210,7 +211,7 @@ void Beamform::processAudioFrame(array3D<float> &data_input, array2D<float>& dat
     {
         for (size_t phi = 0; phi < data_fft.dim_2; phi++)
         {
-            data_output.at(theta, phi) = data_fft.at(theta, phi, frequency_bin);
+            output_buffer.at(theta, phi) = data_fft.at(theta, phi, frequency_bin);
         }
     }
 } // end processAudioFrame
