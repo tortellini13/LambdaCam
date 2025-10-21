@@ -90,6 +90,7 @@ private:
 
     LSlider min_slider{"Min", -100.0f, 0.0f};
     LSlider max_slider{"Max", -100.0f, 0.0f};
+    LSlider midpoint_slider{"Midpoint", 0.0f, 1.0f};
     LSlider alpha_slider{"Alpha", 0.0f, 1.0f};
 
     LCheckBox checkbox_1;

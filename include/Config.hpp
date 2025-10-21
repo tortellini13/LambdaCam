@@ -26,6 +26,7 @@ struct Config
 
     float min = -70.0f;        // Minimum dB for heatmap
     float max = -20.0f;        // Maximum dB for heatmap
+    float midpoint = 0.5f;     // Midpoint for scaling the heatmap
     float alpha = 0.5f;        // Alpha blending for heatmap overlay
 
     // Booleans
@@ -48,7 +49,7 @@ struct Config
         fft_frame_size, sample_rate,
         fov_theta, fov_phi, angle_resolution,
         mic_spacing,
-        min, max, alpha,
+        min, max, midpoint, alpha,
         audio_is_streaming, use_alsa,
         dark_mode, show_heatmap, show_heatmap_legend, show_max_cursor,
         channel_order, recordings_dir, wav_file_name

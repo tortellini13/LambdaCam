@@ -45,4 +45,6 @@ private:
     array5D<complex<float>> directivity_factor; // (theta, phi, m, n, bin)
     array3D<complex<float>> data_beamform;      // (theta, phi, buffer)
     array3D<float> data_fft;                    // (theta, phi, bin)
+
+    int temp = 0;
 };

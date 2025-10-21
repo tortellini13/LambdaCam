@@ -2,6 +2,8 @@
 
 #include <thread>           // For multithreading
 #include <atomic>           // For atomic variables
+#include <mutex>
+#include <condition_variable>
 #include <alsa/asoundlib.h> // ALSA
 #include <chrono>           // For time aligning AudioFile stream
 #include "Structs.hpp"      // Custom structs and enums
@@ -22,9 +24,8 @@ public:
     void startAudioStream();
     void stopAudioStream();
 
-    // Data buffers
-    array3D<float> read_buffer;
-    array3D<float> write_buffer;
+    // Read the next frame of audio (thread safe)
+    bool getNextFrame(array3D<float>& out_buffer);
 
 private:
     // Stream audio with ALSA
@@ -42,6 +43,10 @@ private:
 
     // Global configuration object
     Config &config; // Reference to the global configuration object
+
+    // Data buffers
+    array3D<float> read_buffer;
+    array3D<float> write_buffer;
 
     // General Member Variables
     array2D<int> channel_order;     // Physical channels may not be in correct order
@@ -64,4 +69,11 @@ private:
     thread streaming_thread;        // Thread for recording audio
     atomic<bool> is_streaming;      // Flag for recording status
     atomic<int> pcm_error = 0;      // Flag for buffer error
+
+    // Syncing reads and writes
+    std::mutex audio_mutex;
+    std::condition_variable audio_cv;
+    bool frame_ready = false;
+
+    int temp = 0;
 };

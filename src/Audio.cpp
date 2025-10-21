@@ -1,6 +1,6 @@
 // Libraries
 #include <iostream> 
-#include <alsa/asoundlib.h> 
+#include <alsa/asoundlib.h>
 
 // Headers
 #include "Audio.hpp"
@@ -13,10 +13,10 @@
 /* Class constructors and destructors */
 
 Audio::Audio(Config& global_config) :   
+    config(global_config), // Reference to the global configuration object
+
     read_buffer(global_config.m_channels, global_config.n_channels, global_config.fft_frame_size), // Buffer for audio data
     write_buffer(global_config.m_channels, global_config.n_channels, global_config.fft_frame_size), // Buffer for audio data
-
-    config(global_config), // Reference to the global configuration object
 
     channel_order(config.m_channels, config.n_channels), // Physical channel order to remap
 
@@ -137,6 +137,11 @@ bool Audio::initAudioFile()
 
     // Read the details of the file. May want to use these to compare to settings
     config.sample_rate = audio_stream.getSampleRate();
+    std::cout << "Audio: Sample rate: " << audio_stream.getSampleRate() << "\n";
+    std::cout << "Audio: Bit depth: " << audio_stream.getBitDepth() << "\n";
+    std::cout << "Audio: Number of channels: " << audio_stream.getNumChannels() << "\n";
+    std::cout << "Audio: Number of samples per channel: " << audio_stream.getNumSamplesPerChannel() << "\n";
+    std::cout << "Audio: Length (seconds): " << audio_stream.getLengthInSeconds() << "\n";
 
     std::cout << "Audio: Finished initializing AudioFile\n";
 
@@ -151,6 +156,8 @@ bool Audio::initAudio()
 
     // Remap channel order
     channel_order = LUtil::unpackChannelOrder(config.channel_order);
+    std::cout << "Mic Order:\n";
+    channel_order.print();
 
     // Clear buffers
     read_buffer.fill(0.0f);
@@ -279,43 +286,77 @@ void Audio::streamAudioFile()
 {
     std::cout << "Audio: Starting AudioFile stream\n";
     int frame_counter = 0;
-    float time_align_delay = static_cast<float>(config.fft_frame_size) / static_cast<float>(audio_stream.getSampleRate());
+    int time_align_delay_micro = static_cast<int>(1e6 * static_cast<float>(config.fft_frame_size) 
+                                                   / static_cast<float>(audio_stream.getSampleRate()));
 
     while (is_streaming)
     {
-        // Swap buffers
-        swap(read_buffer.data, write_buffer.data);
-
-        // Return to the beginning of the wav file when done reading
-        if ((frame_counter * config.sample_rate) + static_cast<int>(write_buffer.dim_3) > audio_stream.getNumSamplesPerChannel())
+        // Wait until previous frame has been consumed
         {
-            frame_counter = 0;
-            std::cout << "Repeating Wav File...\n";
+            std::unique_lock<std::mutex> lock(audio_mutex);
+            audio_cv.wait(lock, [this]{ return !frame_ready; });
         }
 
-        // Read audio file into buffer
+        // Fill write_buffer with new audio data
         for (size_t m = 0; m < write_buffer.dim_1; m++)
         {
             for (size_t n = 0; n < write_buffer.dim_2; n++)
             {
                 for (size_t b = 0; b < write_buffer.dim_3; b++)
                 {
-                    write_buffer.at(m, n, b) = 
-                        audio_stream.samples[channel_order.at(m, n)]
-                                            [frame_counter * config.fft_frame_size + b];
+                    int sample_index = frame_counter * config.fft_frame_size + b;
+                    if (sample_index >= audio_stream.getNumSamplesPerChannel())
+                        sample_index = 0; // Loop file
+
+                    write_buffer.at(m, n, b) =
+                        audio_stream.samples[channel_order.at(m, n)][sample_index];
                 }
             }
-            // std::cout << "Buffer at (1, 3, 46): " << write_buffer.at(1, 3, 46) << "\n";
         }
 
         frame_counter++;
+        if (frame_counter * config.fft_frame_size >= audio_stream.getNumSamplesPerChannel())
+        {
+            frame_counter = 0;
+            std::cout << "Repeating WAV file...\n";
+        }
 
-        // Delay reading the next frame to playback in realtime
-        std::this_thread::sleep_for(std::chrono::duration<float>(time_align_delay));
+        // Swap buffers safely and mark frame as ready
+        {
+            std::lock_guard<std::mutex> lock(audio_mutex);
+            swap(read_buffer.data, write_buffer.data);
+            frame_ready = true;
+        }
+        audio_cv.notify_one(); // Notify consumer
+
+        // Delay to mimic real-time playback
+        std::this_thread::sleep_for(std::chrono::microseconds(time_align_delay_micro));
     }
 
     std::cout << "Audio: Ending AudioFile stream\n";
 } // end streamAudioFile
+
+bool Audio::getNextFrame(array3D<float>& out_buffer)
+{
+    std::unique_lock<std::mutex> lock(audio_mutex);
+
+    // Wait until a frame is ready
+    audio_cv.wait(lock, [this]{ return frame_ready || !is_streaming; });
+
+    if (!frame_ready)
+        return false; // Stream ended
+
+    // Copy the data safely
+    out_buffer = read_buffer;
+
+    // Mark frame as consumed
+    frame_ready = false;
+
+    // Notify producer it can write next frame
+    audio_cv.notify_one();
+
+    return true;
+}
 
 //=====================================================================================
 

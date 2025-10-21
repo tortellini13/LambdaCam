@@ -53,6 +53,7 @@ More information about contributing to the project is to come...
 	- [ ] GPU acceleration with compute shaders for beamforming math
 	- [ ] Companion app
 	- [x] Use JSON for configs
+	- [ ] Make x button stop the program correctly
 	- [ ] Add the ability to switch to recording playback during runtime
 	- [ ] Make selection for recording playback
 	- [ ] Recording and playback

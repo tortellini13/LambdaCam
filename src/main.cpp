@@ -63,41 +63,22 @@ int main()
 
     time = 0.05f;
     // LUtil::radialGradient(test_input_data, -100, 0, time);
+
     // Dispatch a thread to stream audio from ALSA or AudioFile
     audio.startAudioStream();
 
-    array2D<int> unpacked_order = LUtil::unpackChannelOrder(global_config.channel_order);
-    std::cout << "Mic Order:\n";
-    unpacked_order.print();
-
     std::cout << "\n==================== Starting main loop ====================\n";
     // Main loop
+    array3D<float> audio_frame(global_config.m_channels, global_config.n_channels, global_config.fft_frame_size);
     while (video.video_running)
     {
         LUtil::radialGradient(test_input_data, 0, -100, time); // Generate a radial gradient***testing
 
         // Perform beamforming algorithm to audio data
-        beamform.processAudioFrame(audio.read_buffer, 40);
+        if (!audio.getNextFrame(audio_frame))
+            LUtil::error("Main", "Failed to get audio frame");
 
-        // Check magnitudes of audio input buffer for debugging
-        array2D<float> channel_magnitudes(audio.read_buffer.dim_1, audio.read_buffer.dim_2);
-        channel_magnitudes.fill(0.0f);
-        for (size_t m = 0; m < audio.read_buffer.dim_1; m++)
-        {
-            for (size_t n = 0; n < audio.read_buffer.dim_2; n++)
-            {
-                for (size_t b = 0; b < audio.read_buffer.dim_3; b++)
-                {
-                    channel_magnitudes.at(m, n) += std::abs(audio.read_buffer.at(m, n, b));
-                }
-                channel_magnitudes.at(m, n) /= static_cast<float>(audio.read_buffer.dim_3);
-            }
-        }
-
-        // channel_magnitudes.print();
-        std::cout << "--------------------------\n";
-
-        beamform.output_buffer.print();
+        beamform.processAudioFrame(audio_frame, 22); // 1kHz bin
 
         // Draw the UI and create a heatmap
         if(!video.processFrame(beamform.output_buffer))

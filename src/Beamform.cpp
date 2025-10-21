@@ -43,45 +43,29 @@ bool Beamform::initFFT()
 
 bool Beamform::initDirectivity()
 {
-    // Clear directovity factor array
-    directivity_factor.fill(0.0f);
+    int min_theta = -config.fov_theta / 2;
+    int min_phi   = -config.fov_phi / 2;
 
-    // Cache values from config for ease of use
-    int fov_theta        = config.fov_theta;
-    int fov_phi          = config.fov_phi;
-    int angle_resolution = config.angle_resolution;
-    int fft_frame_size   = config.fft_frame_size;
-    int sample_rate      = config.sample_rate;
-    float mic_spacing_m  = config.mic_spacing;
-    float speed_of_sound = 343.0f; // Speed of sound in air at 20 degrees Celsius in m/s
-
-    int half_fov_theta = fov_theta / 2;
-    int half_fov_phi   = fov_phi / 2;
-
-    for (size_t theta_index = 0; theta_index < directivity_factor.dim_1; theta_index++)
+    for (int theta = min_theta, t = 0; t < (int)directivity_factor.dim_1; theta += config.angle_resolution, t++)
     {
-        float theta = -half_fov_theta + theta_index * angle_resolution;
-        for (size_t phi_index = 0; phi_index < directivity_factor.dim_2; phi_index++)
+        for (int phi = min_phi, p = 0; p < (int)directivity_factor.dim_2; phi += config.angle_resolution, p++)
         {
-            float phi = -half_fov_phi + phi_index * angle_resolution;
-            for (size_t m = 0; m < directivity_factor.dim_3; m++)
+            for (int m = 0; m < (int)directivity_factor.dim_3; m++)
             {
-                for (size_t n = 0; n < directivity_factor.dim_4; n++)
+                for (int n = 0; n < (int)directivity_factor.dim_4; n++)
                 {
-                    for (size_t bin = 0; bin < directivity_factor.dim_5; bin++)
+                    for (int bin = 0; bin < (int)directivity_factor.dim_5; bin++)
                     {
-                        // Computes steering vector for beamforming
-                        float frequency = static_cast<float>(sample_rate * bin) / static_cast<float>(fft_frame_size);
-                        float wave_number = (2.0f * M_PI * frequency) / speed_of_sound;
-                        float exponent = wave_number * mic_spacing_m * (static_cast<float>(m) * sinf(degtorad(theta)) + static_cast<float>(n) * sinf(degtorad(phi)));
+                        float frequency = (config.sample_rate * bin) / config.fft_frame_size;
+                        float wave_number = (2.0f * M_PI * frequency) / 343.0f;
+                        float exponent = wave_number * config.mic_spacing * (m * sinf(degtorad(theta)) + n * sinf(degtorad(phi)));
                         float real = cosf(exponent);
                         float imag = -sinf(exponent);
-
-                        directivity_factor.at(theta_index, phi_index, m, n, bin) = complex<float>(real, imag);
+                        directivity_factor.at(t, p, m, n, bin) = std::complex<float>(real, imag);
                     }
-                } 
+                }
             }
-        } 
+        }
     }
 
     return true;
@@ -89,6 +73,8 @@ bool Beamform::initDirectivity()
 
 bool Beamform::initBeamform()
 {
+    config.read();
+
     // Allocate memory for arrays
     int num_theta = (config.fov_theta / config.angle_resolution) + 1; // +1 to include both ends
     int num_phi   = (config.fov_phi / config.angle_resolution) + 1;   // +1 to include both ends

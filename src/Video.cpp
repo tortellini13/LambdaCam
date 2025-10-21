@@ -235,9 +235,6 @@ bool Video::initImGui()
         return false;
     }
 
-    // Apply UI style
-    // initUIStyle();
-
     SDL_GL_SetSwapInterval(1); // Enable vsync
 
     std::cout << "Video: ImGui initialized successfully\n";
@@ -355,7 +352,8 @@ bool Video::renderImGui(array2D<float>& beamformed_data)
     ImVec2 slider_size = windowScale(100, 700);
     min_slider.update(windowScale(965, 355), slider_size, config.min);
     max_slider.update(windowScale(1070, 355), slider_size, config.max);
-    alpha_slider.update(windowScale(1175, 355), slider_size, config.alpha);
+    midpoint_slider.update(windowScale(1175, 355), slider_size, config.midpoint);
+    alpha_slider.update(windowScale(1280, 355), slider_size, config.alpha);
 
 
 
@@ -595,33 +593,53 @@ void Video::frametoTexture()
 
 void Video::applyHeatmap(array2D<float>& beamformed_data, const float min, const float max, const float alpha, const ImVec2 camera_size)
 {
-    // Clamp data between min and max
+    // Clamp data between min and max and convert to OpenCV Mat
+    cv::Mat clamped_data(beamformed_data.dim_1, beamformed_data.dim_2, CV_32FC1);
     for (size_t i = 0; i < beamformed_data.dim_1; i++)
     {
         for (size_t j = 0; j < beamformed_data.dim_2; j++)
         {
-            if (beamformed_data.at(i, j) < min)
-                beamformed_data.at(i, j) = min;
-            else if (beamformed_data.at(i, j) > max)
-                beamformed_data.at(i, j) = max;
+            float sample = beamformed_data.at(i, j);
+            if (sample < min)
+                clamped_data.at<float>(i, j) = min;
+            else if (sample > max)
+                clamped_data.at<float>(i, j) = max;
+            else
+                clamped_data.at<float>(i, j) = sample;
         }
     }
-
-    // Convert data to cv::Mat
-    cv::Mat clamped_data(beamformed_data.dim_1, beamformed_data.dim_2, CV_32F, beamformed_data.data);
 
     // Normalize data to be [0 - 255]
     cv::Mat norm_data;
     cv::normalize(clamped_data, norm_data, 0, 255, cv::NORM_MINMAX);
     norm_data.convertTo(norm_data, CV_8U);
 
+    // Shift the midpoint of the heatmap for display purposes
+    cv::Mat midpoint_data(norm_data.rows, norm_data.cols, CV_8U);
+    float midpoint_value = midpoint_slider.value * 255.0f;
+    for (int y = 0; y < norm_data.rows; y++)
+    {
+        for (int x = 0; x < norm_data.cols; x++)
+        {
+            int val = norm_data.at<uchar>(y, x);
+
+            // Scale 0–midpoint to 0–127
+            if (val <= midpoint_value)
+                midpoint_data.at<uchar>(y, x) = 127.0f * (val / midpoint_value);
+
+            // Scale midpoint–255 to 127–255
+            else
+                midpoint_data.at<uchar>(y, x) = 127.0f + 128.0f * ((val - midpoint_value) / (255.0f - midpoint_value));
+        }
+    }
+
     // Ensure heatmap is the same size as the current frame
     cv::Mat resized_data;
-    cv::resize(norm_data, resized_data, current_frame.size());
+    cv::resize(midpoint_data, resized_data, current_frame.size());
 
     // Generate a heatmap
     cv::Mat heatmap;
-    cv::applyColorMap(resized_data, heatmap, cv::COLORMAP_JET); // Apply a colormap to the heatmap data
+    cv::applyColorMap(255 - resized_data, heatmap, cv::COLORMAP_JET); // Apply a colormap to the heatmap data
 
     // Overlay the heatmap onto the current frame using the desired alpha
     cv::Mat merged_frame;
